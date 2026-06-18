@@ -260,19 +260,39 @@ async def search(query: str, suggest_type: str = SUGGEST_STOCK, limit: int = 10)
     return results
 
 
+def _match_score(query: str, rec: dict, position: int) -> float:
+    """Rank a search record against the query.
+
+    Moneycontrol's autosuggest sometimes ranks a loosely-related name first
+    (e.g. 'Eicher Motors' for 'Tata Motors'), so prefer an exact name/symbol
+    match over raw result order, falling back to position as a tie-breaker.
+    """
+    q = query.strip().lower()
+    name = (rec.get("name") or "").lower()
+    symbol = (rec.get("symbol") or "").lower()
+    if name == q or symbol == q:
+        score = 100.0
+    elif name.startswith(q) or symbol.startswith(q):
+        score = 80.0
+    elif q in name:
+        score = 60.0
+    else:
+        score = 0.0
+    return score - position * 0.1  # earlier results win ties
+
+
 async def resolve_stock_id(query: str) -> dict:
     """Resolve a free-text stock query to its best-matching search record.
 
     Raises MoneycontrolError if nothing matches.
     """
-    matches = await search(query, SUGGEST_STOCK, limit=5)
-    matches = [m for m in matches if m["sc_id"]]
+    matches = [m for m in await search(query, SUGGEST_STOCK, limit=8) if m["sc_id"]]
     if not matches:
         raise MoneycontrolError(
             f"No stock found matching '{query}'. Try a fuller company name "
             "(e.g. 'Reliance Industries', 'HDFC Bank')."
         )
-    return matches[0]
+    return max(enumerate(matches), key=lambda iv: _match_score(query, iv[1], iv[0]))[1]
 
 
 # --------------------------------------------------------------------------- #

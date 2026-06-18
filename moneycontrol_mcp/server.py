@@ -146,12 +146,29 @@ class QuoteInput(_Base):
         return v
 
 
-async def _resolve_symbol(symbol: str) -> str:
-    """Return an sc_id: use as-is if it looks like one, else resolve via search."""
-    # sc_ids are short alnum tokens with no spaces (e.g. 'RI', 'HDF01').
-    if " " not in symbol and len(symbol) <= 12 and symbol.isalnum():
-        return symbol
-    return (await client.resolve_stock_id(symbol))["sc_id"]
+async def _resolve_then(symbol, coro_factory):
+    """Fetch stock data, resolving ``symbol`` to a valid sc_id.
+
+    sc_ids are short alnum tokens (e.g. 'RI'), but users often pass an NSE ticker
+    ('RELIANCE') or a name ('Reliance Industries'). Try the literal value as an
+    sc_id first (cheap, correct for true sc_ids); if that fails — which it does for
+    tickers/names — fall back to search-based resolution and retry.
+
+    Args:
+        symbol: User-supplied sc_id, ticker, or company name.
+        coro_factory: async callable taking an sc_id and returning the fetched data.
+
+    Returns:
+        tuple[str, Any]: (resolved sc_id, fetched data).
+    """
+    looks_like_id = " " not in symbol and len(symbol) <= 12 and symbol.isalnum()
+    if looks_like_id:
+        try:
+            return symbol, await coro_factory(symbol)
+        except MoneycontrolError:
+            pass  # not a valid sc_id — resolve via search below
+    sc_id = (await client.resolve_stock_id(symbol))["sc_id"]
+    return sc_id, await coro_factory(sc_id)
 
 
 @mcp.tool(name="moneycontrol_get_quote", annotations={"title": "Get Stock Quote", **READ_ONLY})
@@ -176,8 +193,7 @@ async def moneycontrol_get_quote(params: QuoteInput) -> str:
         Returns "Error: ..." on failure (e.g. unknown symbol).
     """
     try:
-        sc_id = await _resolve_symbol(params.symbol)
-        d = await client.get_stock_pricefeed(sc_id, params.exchange)
+        sc_id, d = await _resolve_then(params.symbol, lambda i: client.get_stock_pricefeed(i, params.exchange))
         payload = {
             "name": _g(d, "SC_FULLNM", "company"),
             "symbol": _g(d, "NSEID" if params.exchange == "nse" else "BSEID", "symbol"),
@@ -257,8 +273,7 @@ async def moneycontrol_get_fundamentals(params: FundamentalsInput) -> str:
         Returns "Error: ..." on failure.
     """
     try:
-        sc_id = await _resolve_symbol(params.symbol)
-        d = await client.get_stock_pricefeed(sc_id, params.exchange)
+        sc_id, d = await _resolve_then(params.symbol, lambda i: client.get_stock_pricefeed(i, params.exchange))
         returns = {
             "1w": _g(d, "cl1wPerChange"),
             "1m": _g(d, "cl1mPerChange"),
@@ -565,8 +580,7 @@ async def moneycontrol_get_technicals(params: TechnicalsInput) -> str:
         Returns "Error: ..." on failure.
     """
     try:
-        sc_id = await _resolve_symbol(params.symbol)
-        d = await client.get_technicals(sc_id, params.exchange, params.period)
+        sc_id, d = await _resolve_then(params.symbol, lambda i: client.get_technicals(i, params.exchange, params.period))
         if params.response_format == ResponseFormat.JSON:
             return json.dumps(d, indent=2, ensure_ascii=False)
         lines = [
