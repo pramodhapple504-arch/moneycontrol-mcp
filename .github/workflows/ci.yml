@@ -19,14 +19,16 @@ jobs:
           python-version: "3.11"
 
       - name: Install package
-        run: uv pip install --system -e .
+        run: |
+          uv venv
+          uv pip install -e .
 
       - name: Compile sources
-        run: python -m compileall moneycontrol_mcp
+        run: uv run python -m compileall moneycontrol_mcp
 
       - name: Verify all tools register (no network)
         run: |
-          python - <<'PY'
+          uv run python - <<'PY'
           import asyncio
           from moneycontrol_mcp.server import mcp
 
@@ -58,6 +60,8 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install package
-        run: uv pip install --system -e .
+        run: |
+          uv venv
+          uv pip install -e .
       - name: Run smoke test against live endpoints
-        run: python scripts/smoke_test.py
+        run: uv run python scripts/smoke_test.py
