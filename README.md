@@ -22,6 +22,7 @@ news, and technical pivot levels.
 | `moneycontrol_fii_dii` | FII & DII net activity in ₹ crore — **cash market** headline plus F&O segments, by day. |
 | `moneycontrol_get_news` | Current news headlines for a topic/stock (`query`) or a category (markets, latest, business, economy, results, stocks, ipo, mutual-funds). Pass a company name for stock-specific news. |
 | `moneycontrol_get_technicals` | Pivot points and support/resistance levels (daily/weekly/monthly). |
+| `moneycontrol_get_history` | Historical OHLCV bars for an NSE stock — daily/weekly/monthly or intraday (1m–1h). |
 
 Every tool accepts `response_format: "markdown"` (default, human-readable) or `"json"`
 (structured, for programmatic use).
@@ -89,7 +90,14 @@ auto-resolve it via search, but passing the `sc_id` is faster and unambiguous.)
   segments are also exposed via `segment="fno"` or `"all"`.
 - Index codes for the most common indices are built in; any other index name is
   resolved at runtime via Moneycontrol search.
+- Historical data (`moneycontrol_get_history`) is for **NSE equities** via the
+  techCharts feed; index history and BSE-only scrips are not currently supported.
 - Commodity/forex quotes are **not** included: Moneycontrol's public price feed
   requires contract/expiry-specific codes for those and is not reliably accessible.
+- **Top gainers/losers, options chain, and corporate actions** are not included:
+  Moneycontrol does not expose clean public JSON endpoints for these. If you need
+  them, the NSE-backed tools in sibling MCP servers (e.g. `finstack`'s
+  `nse_top_movers` / `nse_options_chain` / `nse_corporate_actions`, or `dhan`)
+  cover that ground.
 - Data reflects whatever Moneycontrol publishes (often delayed during market hours;
   provisional FII/DII data updates after market close).

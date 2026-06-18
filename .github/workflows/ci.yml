@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & tool-registration check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: uv pip install --system -e .
+
+      - name: Compile sources
+        run: python -m compileall moneycontrol_mcp
+
+      - name: Verify all tools register (no network)
+        run: |
+          python - <<'PY'
+          import asyncio
+          from moneycontrol_mcp.server import mcp
+
+          EXPECTED = {
+              "moneycontrol_search",
+              "moneycontrol_get_quote",
+              "moneycontrol_get_fundamentals",
+              "moneycontrol_get_index",
+              "moneycontrol_fii_dii",
+              "moneycontrol_get_news",
+              "moneycontrol_get_technicals",
+              "moneycontrol_get_history",
+          }
+          names = {t.name for t in asyncio.run(mcp.list_tools())}
+          missing = EXPECTED - names
+          assert not missing, f"missing tools: {missing}"
+          assert all(t.annotations.readOnlyHint for t in asyncio.run(mcp.list_tools())), "all tools must be read-only"
+          print(f"OK: {len(names)} tools registered: {sorted(names)}")
+          PY
+
+  smoke:
+    name: Live smoke test (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true  # hits live Moneycontrol endpoints; may be throttled/blocked from CI
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - name: Install package
+        run: uv pip install --system -e .
+      - name: Run smoke test against live endpoints
+        run: python scripts/smoke_test.py

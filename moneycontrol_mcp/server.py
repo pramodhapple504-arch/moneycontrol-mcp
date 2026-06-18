@@ -587,6 +587,65 @@ async def moneycontrol_get_technicals(params: TechnicalsInput) -> str:
         return f"Error: {e}"
 
 
+# --------------------------------------------------------------------------- #
+# Tool: historical OHLC
+# --------------------------------------------------------------------------- #
+
+class HistoryInput(_Base):
+    symbol: str = Field(..., description="NSE trading symbol (e.g. 'RELIANCE') or company name to auto-resolve.", min_length=1, max_length=120)
+    interval: str = Field(default="daily", description="Bar interval: 1m, 5m, 15m, 30m, 1h, daily, weekly, monthly.")
+    count: int = Field(default=30, description="Number of most-recent bars to return.", ge=1, le=500)
+    response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN, description="'markdown' or 'json'.")
+
+    @field_validator("interval")
+    @classmethod
+    def _interval(cls, v: str) -> str:
+        v = v.lower()
+        if v not in client.HISTORY_RESOLUTIONS:
+            raise ValueError(f"interval must be one of {sorted(client.HISTORY_RESOLUTIONS)}")
+        return v
+
+
+@mcp.tool(name="moneycontrol_get_history", annotations={"title": "Get Historical OHLC Prices", **READ_ONLY})
+async def moneycontrol_get_history(params: HistoryInput) -> str:
+    """Get historical OHLCV price bars for an NSE stock (daily/weekly/monthly or intraday).
+
+    Args:
+        params (HistoryInput):
+            - symbol (str): NSE trading symbol (e.g. 'RELIANCE', 'HDFCBANK') or company name.
+            - interval (str): 1m, 5m, 15m, 30m, 1h, daily (default), weekly, monthly.
+            - count (int): Number of most-recent bars (1-500, default 30).
+            - response_format (ResponseFormat): 'markdown' or 'json'.
+
+    Returns:
+        str: Bars ordered oldest → newest. Each bar (JSON mode):
+        {"time": str, "open": float, "high": float, "low": float, "close": float, "volume": float}
+        JSON mode wraps them as {"symbol", "ticker", "interval", "count", "bars": [...]}.
+        Returns "Error: ..." on failure (e.g. no data at that resolution).
+    """
+    try:
+        ticker = await client.resolve_udf_ticker(params.symbol)
+        resolution = client.HISTORY_RESOLUTIONS[params.interval]
+        bars = await client.get_history(ticker, resolution, params.count)
+        if params.response_format == ResponseFormat.JSON:
+            return json.dumps(
+                {"symbol": params.symbol, "ticker": ticker, "interval": params.interval, "count": len(bars), "bars": bars},
+                indent=2, ensure_ascii=False,
+            )
+        lines = [
+            f"# {ticker} — {params.interval} history ({len(bars)} bars)",
+            "",
+            "| Time | Open | High | Low | Close | Volume |",
+            "|------|-----:|-----:|----:|------:|-------:|",
+        ]
+        for b in bars:
+            vol = f"{b['volume']:,.0f}" if isinstance(b["volume"], (int, float)) else "—"
+            lines.append(f"| {b['time']} | {b['open']} | {b['high']} | {b['low']} | {b['close']} | {vol} |")
+        return "\n".join(lines)
+    except MoneycontrolError as e:
+        return f"Error: {e}"
+
+
 def main() -> None:
     """Console-script entry point: run the server over stdio."""
     mcp.run()

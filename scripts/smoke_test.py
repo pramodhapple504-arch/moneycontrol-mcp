@@ -50,6 +50,12 @@ async def main() -> None:
     banner("technicals: RI daily")
     print(await s.moneycontrol_get_technicals(s.TechnicalsInput(symbol="RI", period="D")))
 
+    banner("history: RELIANCE daily x5")
+    print(await s.moneycontrol_get_history(s.HistoryInput(symbol="RELIANCE", interval="daily", count=5)))
+
+    banner("history by name: Infosys weekly x4")
+    print(await s.moneycontrol_get_history(s.HistoryInput(symbol="Infosys", interval="weekly", count=4)))
+
 
 if __name__ == "__main__":
     asyncio.run(main())

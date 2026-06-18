@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from typing import Any, Optional
 
 import httpx
@@ -25,8 +26,15 @@ import httpx
 # --------------------------------------------------------------------------- #
 
 PRICE_API = "https://priceapi.moneycontrol.com/pricefeed"
+TECHCHARTS = "https://priceapi.moneycontrol.com/techCharts/indianMarket/stock"
 AUTOSUGGEST = "https://www.moneycontrol.com/mccode/common/autosuggestion_solr.php"
 FII_DII_URL = "https://www.moneycontrol.com/markets/fii-dii-data/"
+
+# Friendly history interval -> techCharts UDF resolution code.
+HISTORY_RESOLUTIONS: dict[str, str] = {
+    "1m": "1", "3m": "3", "5m": "5", "15m": "15", "30m": "30", "1h": "60",
+    "daily": "D", "1d": "D", "weekly": "W", "1w": "W", "monthly": "M", "1mo": "M",
+}
 
 _UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -37,6 +45,7 @@ DEFAULT_HEADERS = {
     "Accept": "application/json, text/javascript, text/html, */*",
     "Accept-Language": "en-US,en;q=0.9",
     "Referer": "https://www.moneycontrol.com/",
+    "Origin": "https://www.moneycontrol.com",
     "X-Requested-With": "XMLHttpRequest",
 }
 
@@ -289,6 +298,68 @@ async def get_technicals(sc_id: str, exchange: str = "nse", period: str = "D") -
         raise MoneycontrolError("period must be 'D', 'W', or 'M'.")
     payload = await _get(f"{PRICE_API}/techindicator/{period}/{sc_id}", expect="json")
     return _unwrap_pricefeed(payload, context=f"technicals for '{sc_id}'")
+
+
+# --------------------------------------------------------------------------- #
+# Historical OHLC (techCharts UDF feed)
+# --------------------------------------------------------------------------- #
+
+async def resolve_udf_ticker(query: str) -> str:
+    """Resolve a name/symbol to the NSE trading ticker used by the techCharts feed.
+
+    Returns the input unchanged if it already looks like a plain ticker and search
+    yields nothing. Prefers the NSE listing.
+    """
+    raw = await _get(
+        f"{TECHCHARTS}/search",
+        params={"query": query, "type": "", "exchange": "", "limit": 10},
+        expect="json",
+    )
+    if isinstance(raw, list) and raw:
+        nse = [r for r in raw if isinstance(r, dict) and r.get("exchange") == "NSE" and r.get("type") == "stock"]
+        chosen = (nse or [r for r in raw if isinstance(r, dict)])[0]
+        ticker = (chosen.get("ticker") or chosen.get("symbol") or "").strip()
+        if ticker:
+            return ticker
+    return query.strip().upper()
+
+
+async def get_history(ticker: str, resolution: str = "D", count: int = 30) -> list[dict]:
+    """Fetch historical OHLCV bars (most recent last) for an NSE ticker.
+
+    ``resolution`` is a techCharts UDF code ('1','5','15','30','60','D','W','M').
+    Uses ``countback`` (the ``from`` parameter is blocked by Moneycontrol's WAF).
+    """
+    payload = await _get(
+        f"{TECHCHARTS}/history",
+        params={"symbol": ticker, "resolution": resolution, "countback": count, "to": int(time.time())},
+        expect="json",
+    )
+    if not isinstance(payload, dict):
+        raise MoneycontrolError(f"Unexpected history response for '{ticker}'.")
+    status = payload.get("s")
+    if status == "no_data":
+        raise MoneycontrolError(f"No historical data available for '{ticker}' at this resolution.")
+    if status != "ok":
+        raise MoneycontrolError(f"Could not fetch history for '{ticker}': {payload.get('errmsg', 'unknown error')}.")
+
+    ts, o, h, l, c = payload.get("t", []), payload.get("o", []), payload.get("h", []), payload.get("l", []), payload.get("c", [])
+    v = payload.get("v", [])
+    bars: list[dict] = []
+    for i, t in enumerate(ts):
+        bars.append(
+            {
+                "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(t)) if resolution.isdigit() else time.strftime("%Y-%m-%d", time.localtime(t)),
+                "open": o[i] if i < len(o) else None,
+                "high": h[i] if i < len(h) else None,
+                "low": l[i] if i < len(l) else None,
+                "close": c[i] if i < len(c) else None,
+                "volume": v[i] if i < len(v) else None,
+            }
+        )
+    if not bars:
+        raise MoneycontrolError(f"No bars returned for '{ticker}'.")
+    return bars
 
 
 # --------------------------------------------------------------------------- #
