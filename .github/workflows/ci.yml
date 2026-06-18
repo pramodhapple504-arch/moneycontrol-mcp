@@ -19,9 +19,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install package
-        run: |
-          uv venv
-          uv pip install -e .
+        run: uv pip install -e .
 
       - name: Compile sources
         run: uv run python -m compileall moneycontrol_mcp
@@ -60,8 +58,6 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install package
-        run: |
-          uv venv
-          uv pip install -e .
+        run: uv pip install -e .
       - name: Run smoke test against live endpoints
         run: uv run python scripts/smoke_test.py
